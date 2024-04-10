@@ -1,0 +1,299 @@
+---
+title: "Module 6"
+author: "Sankalp Biswal"
+date: "2023-12-15"
+output: html_document
+---
+
+## 1.Importing Libraries
+```{r}
+library(tidyverse)
+library(janitor)
+library(dplyr)
+library(magrittr)
+
+```
+
+## 2.Importing dataset
+
+* Selecting variables of interest
+```{r}
+property_dataset <- read.csv("fy2023-property-assessment-data.csv")
+
+property_subset <- subset(property_dataset,select = c(CITY,LU,LU_DESC,BLDG_TYPE,LAND_SF,GROSS_AREA,BLDG_VALUE,LAND_VALUE,TOTAL_VALUE,GROSS_TAX,YR_BUILT,YR_REMODEL,ROOF_STRUCTURE,BED_RMS,FULL_BTH,KITCHENS,TT_RMS,RES_FLOOR,OVERALL_COND,HEAT_TYPE,AC_TYPE,PROP_VIEW,NUM_PARKING,FIREPLACES,ZIP_CODE,LIVING_AREA))
+```
+
+## 3. Data cleaning
+
+
+```{r}
+clean_numeric_columns <- function(x) {
+  # Remove outliers based on IQR
+  q1 <- quantile(x, 0.25, na.rm = TRUE)
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  iqr_value <- IQR(x, na.rm = TRUE)
+  
+  lower_bound <- q1 - 1.5 * iqr_value
+  upper_bound <- q3 + 1.5 * iqr_value
+  
+  x_outliers_removed <- ifelse(x < lower_bound | x > upper_bound, NA, x)
+  
+  # Impute missing values with the median
+  x_cleaned <- ifelse(is.na(x_outliers_removed), median(x, na.rm = TRUE), x_outliers_removed)
+  
+  return(x_cleaned)
+}
+
+# Clean all numeric columns in the dataset
+property_subset_clean <- property_subset %>%
+  mutate(across(where(is.numeric), clean_numeric_columns))
+
+# Remove rows with any NA values after cleaning
+property_subset_clean <- na.omit(property_subset_clean)
+
+property_subset_clean <- property_subset_clean %>%
+  mutate(CITY = ifelse(CITY == "" | is.na(CITY), "Unknown", CITY))
+
+property_subset_clean <- property_subset_clean %>%
+  mutate(OVERALL_COND = ifelse(OVERALL_COND == "" | is.na(OVERALL_COND), "Unknown", OVERALL_COND))
+
+property_subset_clean <- property_subset_clean %>%
+  mutate(PROP_VIEW = ifelse(PROP_VIEW == "" | is.na(PROP_VIEW), "Unknown", PROP_VIEW))
+
+property_subset_clean <- property_subset_clean %>%
+  mutate(AC_TYPE = ifelse(AC_TYPE == "" | is.na(AC_TYPE), "Unknown", AC_TYPE))
+
+property_dataset <- clean_names(property_dataset)
+
+property_extract <- subset(property_dataset, select = c("total_value", "living_area" ,"prop_view"))
+
+property_extract <- na.omit(property_extract)
+
+# Replace blank with NA 
+property_extract[property_extract == ""] <- NA
+
+# Omit rows with missing values
+property_extract <- na.omit(property_extract)
+```
+
+
+## 4. Tabulations
+
+## Overview
+
+* There are 2 parts namely - **PART-1 and PART-2**.
+* **PART-1** deals with creation of dummy variables for the categorical variable "prop_view" and then running regression model for predicting total_value
+* **PART-2** deals with creation of separate regression lines for predicting "total_value" using the subsetted data from PART-1.
+
+
+---------------------
+
+## PART-1
+
+* We create **dummy variables** for the **categorical variable** "prop_view".
+* We run the **regression model** for these **dummy variables** and **living area**.
+
+```{r}
+# Step 1: Create dummy variables for prop_view
+
+df_dummies <- model.matrix(~ prop_view -1 , data = property_extract)  # -1 removes intercept term
+
+# Step 2: Combine the dummy variables with the original dataset
+df_combined <- cbind(property_extract["total_value"],property_extract["living_area"], df_dummies)
+
+# Step 3: Run regression model
+
+model <- lm(total_value ~ ., data = df_combined)
+
+# Step 4: Print model summary
+summary(model)
+
+# Step 5: Extract coefficients
+coefficients <- coef(model)
+
+# Step 6: Extract the number of subsets
+num_subsets <- length(coefficients) - 1  # Exclude the intercept term
+
+# Step 7: Extract the number of lines
+num_lines <- nrow(df_combined)
+
+
+# Step 8: Print the results
+cat("Number of subsets:", num_subsets, "\n")
+cat("Number of lines:", num_lines, "\n")
+
+
+
+```
+## Model Summary:
+
+1. **Residuals:** The residuals represent the differences between the observed and predicted values. The spread of residuals ranges from -38,245,561 to 33,204,493.
+
+2. **Coefficients:** Coefficients indicate the estimated change in the dependent variable for a one-unit change in the predictor variable.
+
+3. **Residual Standard Error:** The standard deviation of the residuals is 666,000, providing a measure of the typical distance between observed and predicted values.
+
+4. **R-squared and Adjusted R-squared:** The R-squared is 0.7957, indicating that approximately 79.57% of the variability in total_value is explained by the model.
+
+5. **Significance Levels:**
+
+* P-values less than 0.001 (***): Highly significant
+* P-values between 0.001 and 0.01 (**): Very significant
+* P-values between 0.01 and 0.05 (*): Significant
+* P-values between 0.05 and 0.1 (.): Marginally significant
+
+6. **Coefficient Interpretation:**
+
+a. **Intercept ((Intercept)):**
+Estimate: 4,576,000
+Interpretation: When all predictor variables are zero, the estimated total_value is 4,576,000.
+
+b. **living_area:**
+Estimate: 424.3
+P-value: < 2e-16 (Highly significant)
+Interpretation: A one-unit increase in living area is associated with a highly significant increase of 424.3 units in total_value
+
+c. **prop_viewA - Average:**
+Estimate: -4,566,000
+P-value: < 2e-16 (Highly significant)
+Interpretation: Compared to the reference category (PROP_VIEWS - Special), the Average condition is associated with a highly significant decrease of 4,566,000 units in total_value
+
+d. **prop_viewE - Excellent:**
+Estimate: -3,246,000
+P-value: < 2e-16 (Highly significant)
+Interpretation: The Excellent condition has a highly significant negative impact, decreasing total_value by 3,246,000 units compared to the reference.
+
+e. **prop_viewF - Fair:**
+Estimate: -4,526,000
+P-value: < 2e-16 (Highly significant)
+Interpretation: The Fair condition decreases total_value by a highly significant 4,526,000 units compared to the reference.
+
+f. **prop_viewG - Good:**
+Estimate: -4,039,000
+P-value: < 2e-16 (Highly significant)
+Interpretation: The Good condition decreases total_value by a highly significant 4,039,000 units compared to the reference.
+
+g. **prop_viewP - Poor:**
+Estimate: -4,460,000
+P-value: < 2e-16 (Highly significant)
+Interpretation: The Poor condition decreases total_value by a highly significant 4,460,000 units compared to the reference.
+
+h. **prop_viewS - Special:**
+Estimate: NA (Not defined due to singularities)
+P-value: NA
+Interpretation: This coefficient is not interpretable due to multicollinearity issues.
+
+## Summary:
+
+1. The model explains approximately **79.57%** of the variability in total_value.
+2. Each **prop_view** category contributes significantly to the predicted **total_value**.
+3. The living area is positively associated with an increase in **total_value**.
+4. The model provides valuable insights into the factors influencing the total value of  of the variability in **total_value**.
+
+## Scatterplot with multiple regression lines
+
+```{r}
+# Step 8: Create a scatterplot with multiple regression lines
+library(ggplot2)
+
+options(scipen = 100, digits = 10)
+
+ggplot(df_combined, aes(x = living_area, y = total_value, color = property_extract$prop_view)) +
+  geom_point(size = 0.25, alpha = 0.8) +
+  geom_smooth(method = "lm", se = FALSE, fullrange = TRUE ,size = 0.5) +  # Explicitly set group to 1
+  labs(title = "Scatterplot with Multiple Regression Lines",
+       x = "Living Area", 
+       y = "Total Value") +theme_minimal()+ scale_y_continuous(breaks = seq(0, 60000000, by = 500000), limits = c(0, 6000000)) + scale_x_continuous(breaks = seq(0, 16000, by = 2000),  limits = c(0, 16000))
+
+
+options(scipen = 0, digits = 7)
+
+```
+
+## Interpretation
+
+1. **Points on the Scatterplot:**
+
+* Each point on the scatterplot represents an observation in the dataset.
+* The x-coordinate of each point represents the **living area** (living_area), and the y-coordinate represents the **total value** (total_value).
+* The color of each point corresponds to the different levels of the categorical variable **prop_view**. Each color represents a different category or level of the variable.
+* **Special** view has the steepest slope indicating that there is highest increase in total value per sqft living area for houses with this view.
+* **Fair** view has the lowest slope indicating that there is lowest increase in total value per sqft living area for houses with this view.
+
+2. **Regression Lines:**
+
+* Each regression line represents the linear relationship between **living area** and **total value** for a specific category of **prop_view.**
+* Since fullrange = TRUE, the lines extend across the entire range of the x-axis, giving us a sense of the overall trend.
+
+3. **Interpretation of Regression Lines:**
+
+* The slope of each regression line represents the average change in **total value** associated with a one-unit increase in **living area** for a specific category of **prop_view**.
+* If the line **slopes upward**, it suggests a **positive relationship** between **living area** and **total value** for that **category**. If it **slopes downward**, it suggests a **negative relationship.**
+
+
+--------------------------
+
+## PART-2 
+
+* Now, we'll plot the **regression line** for **each subset**. 
+
+
+```{r}
+options(scipen = 100, digits = 10)
+# Assuming 'prop_view' is a factor variable
+property_extract$prop_view <- as.factor(property_extract$prop_view)
+
+# Fit separate linear regression models for each subset
+regression_results <- property_extract %>%
+  group_by(prop_view) %>%
+  do(model = list(lm(total_value ~ living_area, data = .)))
+
+
+# Create separate scatterplots with regression lines for each subset
+for (i in seq_along(regression_results$model)) {
+  level <- levels(property_extract$prop_view)[i]
+  plot_data <- subset(property_extract, prop_view == level)
+  
+  individual_graph <- ggplot(data = plot_data, aes(x = living_area, y = total_value, color = prop_view)) +
+    geom_point(size= 0.5) +
+    geom_smooth(method = "lm", se = FALSE, color = "green") +
+    labs(title = paste("Scatterplot for", level),
+         x = "Living Area",
+         y = "Total Value") +
+    theme_minimal()+ scale_y_continuous(breaks = seq(0, 60000000, by = 500000), limits = c(0, 6000000)) + scale_x_continuous(breaks = seq(0, 16000, by = 2000),  limits = c(0, 16000))
+  
+  print(individual_graph)  # Use print() to display the plot
+}
+
+
+
+```
+
+## Interpretation
+
+1. Upon plotting individual graphs, we notice that the graphs for each **subset** are lot more **clearer**.
+2. For **independent analysis** the individual graphs are better since points are more visible and have higher interpretability.
+3. For **comparative analysis**, graph in PART-1 is better since we have all the graphs at one place.
+4. **Point analysis** in the individual graphs is because in **PART-1** graph there's an **overlap** between different **prop_view.**
+5. There's a **positive correlation** for all the above graphs.
+6. **Average** and **Good** property views have densely populated scatterplot for smaller values indicating that value for houses with such view are lower.
+
+
+----------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
